@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Como o WebSocket funciona neste jogo</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; line-height: 1.55; background: #f6f4ed; color: #18252b; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header { background: #18252b; color: white; padding: 3.5rem max(1.25rem, calc((100vw - 900px) / 2)); }
+    header p { max-width: 65ch; color: #d6e2e3; }
+    main { max-width: 900px; margin: auto; padding: 2rem 1.25rem 5rem; }
+    h1 { font-size: clamp(2rem, 5vw, 3.4rem); line-height: 1.12; margin: .5rem 0 1rem; }
+    h2 { margin-top: 2.8rem; font-size: 1.55rem; }
+    h3 { margin-bottom: .3rem; }
+    p, li { max-width: 75ch; }
+    a { color: #126684; }
+    header a { color: #fff; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    code { background: #e8eceb; padding: .1em .3em; border-radius: .25rem; }
+    pre { overflow-x: auto; background: #18252b; color: #f4f8f8; padding: 1rem; border-radius: .65rem; font-size: .9rem; }
+    pre code { background: none; padding: 0; }
+    nav { display: flex; flex-wrap: wrap; gap: .6rem; margin: 1.5rem 0; }
+    nav a { border: 1px solid #b8c6c8; border-radius: 2rem; padding: .35rem .8rem; text-decoration: none; }
+    .note { border-left: .35rem solid #e7ad35; background: #fff9e8; padding: .9rem 1.1rem; margin: 1.4rem 0; }
+    .flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: .7rem; margin: 1.5rem 0; }
+    .flow div { background: #fff; border: 1px solid #d4dddc; border-radius: .7rem; padding: 1rem; }
+    .flow b { display: block; color: #126684; }
+    .flow small { display: block; margin-top: .4rem; }
+    .step { border-top: 1px solid #ccd6d5; padding-top: .7rem; }
+    .step strong { color: #126684; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border-bottom: 1px solid #ccd6d5; text-align: left; padding: .7rem; vertical-align: top; }
+    th { background: #e8eceb; }
+    @media (max-width: 700px) { .flow { grid-template-columns: 1fr 1fr; } table { font-size: .88rem; } }
+    @media (max-width: 450px) { .flow { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <small>GUIA DO PROJETO · QUENTE OU FRIO POR DESENHO</small>
+    <h1>WebSocket no Laravel, passo a passo</h1>
+    <p>Um mapa para entender como uma jogada feita em uma aba aparece na outra, com os arquivos exatos deste projeto.</p>
+  </header>
+
+  <main>
+    <nav aria-label="Seções deste guia">
+      <a href="#ideia">A ideia</a>
+      <a href="#conexao">Conexão</a>
+      <a href="#jogada">Uma jogada</a>
+      <a href="#seguranca">Segurança</a>
+      <a href="#recuperacao">Reconexão</a>
+      <a href="#arquivos">Mapa dos arquivos</a>
+    </nav>
+
+    <section id="ideia">
+      <h2>1. A ideia em uma frase</h2>
+      <p>HTTP serve para pedir algo e receber uma resposta. WebSocket mantém uma conexão aberta para o servidor enviar novidades ao navegador assim que elas acontecerem.</p>
+      <p>No Laravel, <strong>broadcasting</strong> publica eventos em canais. O <strong>Reverb</strong> mantém as conexões WebSocket. No navegador, <strong>Laravel Echo</strong> oferece a API para assinar canais e ouvir eventos; <strong>pusher-js</strong> fala o protocolo usado pelo Reverb.</p>
+      <div class="note"><strong>Neste jogo:</strong> o navegador envia ações, como desenhar e palpitar, por HTTP. O WebSocket entrega as atualizações do servidor às abas conectadas. O Reverb não substitui as rotas da API.</div>
+    </section>
+
+    <section id="conexao">
+      <h2>2. Como uma aba começa a escutar</h2>
+      <div class="flow" aria-label="Fluxo de conexão e autorização">
+        <div><b>React</b><small>Abre conexão com Reverb na porta 8080.</small></div>
+        <div><b>Echo</b><small>Pede o canal privado participants.ID.</small></div>
+        <div><b>Laravel HTTP</b><small>Autoriza a inscrição usando o token Bearer.</small></div>
+        <div><b>Reverb</b><small>Entrega eventos desse canal à aba autorizada.</small></div>
+      </div>
+      <ol>
+        <li class="step"><strong>Conectar:</strong> em <code>resources/js/app.tsx</code>, um <code>useEffect</code> cria <code>Echo</code> com <code>broadcaster: 'reverb'</code>. Os valores <code>VITE_REVERB_*</code> dizem ao navegador onde está o servidor WebSocket.</li>
+        <li class="step"><strong>Pedir inscrição:</strong> <code>echo.private(`participants.${state.you.id}`)</code> solicita o canal do participante atual. O canal privado precisa de autorização; conhecer seu nome não basta.</li>
+        <li class="step"><strong>Autorizar por HTTP:</strong> Echo envia <code>POST /api/broadcasting/auth</code> com o token Bearer. <code>AppServiceProvider.php</code> registra essa rota com <code>auth:participant</code>. A regra em <code>routes/channels.php</code> só permite <code>participants.ID</code> quando o ID é o do participante autenticado.</li>
+        <li class="step"><strong>Ouvir:</strong> depois da inscrição, <code>.listen('.game.updated', ...)</code> recebe o conteúdo do evento e chama <code>acceptRef.current(event)</code>. O ponto inicial em <code>.game.updated</code> indica o nome personalizado definido por <code>broadcastAs()</code>.</li>
+      </ol>
+      <pre><code>// resources/js/app.tsx — versão reduzida
+echo.private(`participants.${state.you.id}`)
+  .listen('.game.updated', (event) =&gt; acceptRef.current(event));</code></pre>
+      <p>A porta 8000 atende a página e a API Laravel; a porta 8080 atende o Reverb na configuração local de exemplo. <code>composer run dev</code> inicia ambos, além do agendador e do Vite.</p>
+    </section>
+
+    <section id="jogada">
+      <h2>3. Acompanhe um traço desenhado</h2>
+      <ol>
+        <li class="step"><strong>Entrada:</strong> <code>DrawingCanvas.tsx</code> captura pontos do ponteiro. <code>GameScreen.tsx</code> passa o lote para <code>enqueue</code> em <code>app.tsx</code>.</li>
+        <li class="step"><strong>Envio:</strong> <code>drain</code> envia <code>POST /api/room/draw</code>. O traço já aparece localmente enquanto aguarda a confirmação.</li>
+        <li class="step"><strong>Servidor:</strong> <code>GameController.php</code> valida os dados; <code>Game.php</code> verifica papel, rodada e revisão, e grava a alteração no banco.</li>
+        <li class="step"><strong>Publicação:</strong> <code>Game.php::notify()</code> prepara um evento para cada participante. <code>DB::afterCommit</code> espera a transação terminar, então dispara <code>GameUpdated</code>. Esse evento usa <code>ShouldBroadcastNow</code> para transmitir imediatamente, sem um worker de filas.</li>
+        <li class="step"><strong>Entrega:</strong> <code>GameUpdated.php</code> publica em <code>PrivateChannel('participants.ID')</code>. O driver Reverb entrega <code>game.updated</code> às abas inscritas.</li>
+        <li class="step"><strong>Tela:</strong> o listener no <code>app.tsx</code> chama <code>accept</code>. Ele combina a atualização com o estado atual e o React redesenha os componentes.</li>
+      </ol>
+      <pre><code>// Ideia do conteúdo de um evento; campos ilustrativos
+{
+  "state": { "round_number": 1, "version": 8, "revision": 3 },
+  "delta": { "kind": "stroke", "chunk": { "points": [[10, 20]] }, "revision": 3 },
+  "guess_update": null
+}</code></pre>
+      <p>O desenho é transmitido como pontos, cor e espessura; não como uma imagem inteira. Para palpites, o mesmo evento pode incluir <code>guess_update</code> em vez de um delta de desenho.</p>
+    </section>
+
+    <section id="seguranca">
+      <h2>4. Por que o canal é por participante?</h2>
+      <p><code>RoomState.php</code> monta uma versão do estado para cada pessoa. Durante a rodada, o avaliador pode receber o objeto secreto e a proximidade numérica; o desenhista não recebe esses campos. Por isso <code>Game.php::notify()</code> percorre os participantes e cria um conteúdo próprio para cada canal.</p>
+      <p>A autenticação por Bearer identifica o participante; <code>routes/channels.php</code> impede que ele assine o canal de outra pessoa. A chave pública <code>REVERB_APP_KEY</code> identifica a aplicação no Reverb. Ela não substitui o token do participante e não dá acesso a canais privados. <code>REVERB_APP_SECRET</code> permanece no backend.</p>
+    </section>
+
+    <section id="recuperacao">
+      <h2>5. E se o WebSocket falhar ou chegar fora de ordem?</h2>
+      <p>O estado verdadeiro fica no servidor. O <code>app.tsx</code> também consulta <code>GET /api/room</code> ao entrar, ao reconectar, quando a aba volta a ficar visível e a cada cinco segundos. Assim, a tela se recupera de eventos perdidos. Uma falha no envio do broadcast é registrada no Laravel, mas não desfaz a jogada já confirmada no banco.</p>
+      <p><code>roundUpdates.ts</code> compara rodada, versão e horário para rejeitar atualizações antigas. No desenho, a revisão permite detectar uma lacuna; quando isso acontece, o cliente busca o desenho completo por HTTP.</p>
+      <div class="note"><strong>Regra para lembrar:</strong> WebSocket acelera a atualização da interface; HTTP recupera o estado completo e envia as ações. O banco guarda o resultado permanente.</div>
+    </section>
+
+    <section id="arquivos">
+      <h2>6. Onde procurar no código</h2>
+      <table>
+        <thead><tr><th>Arquivo</th><th>Responsabilidade</th></tr></thead>
+        <tbody>
+          <tr><td><code>resources/js/app.tsx</code></td><td>Conexão Echo, listener, consulta HTTP, fila do desenho e aplicação de atualizações.</td></tr>
+          <tr><td><code>resources/js/roundUpdates.ts</code></td><td>Combina eventos e respostas sem aceitar dados antigos.</td></tr>
+          <tr><td><code>app/Providers/AppServiceProvider.php</code></td><td>Autenticação Bearer e rota de autorização do broadcast.</td></tr>
+          <tr><td><code>routes/channels.php</code></td><td>Regra de acesso ao canal privado.</td></tr>
+          <tr><td><code>app/Game/Game.php</code></td><td>Processa a jogada e dispara a notificação após gravá-la.</td></tr>
+          <tr><td><code>app/Game/RoomState.php</code></td><td>Escolhe os dados que cada participante pode receber.</td></tr>
+          <tr><td><code>app/Events/GameUpdated.php</code></td><td>Define canal, nome e conteúdo do evento.</td></tr>
+          <tr><td><code>config/broadcasting.php</code> e <code>config/reverb.php</code></td><td>Configuram o driver e o servidor Reverb.</td></tr>
+        </tbody>
+      </table>
+      <h3>Como observar em execução</h3>
+      <p>Com <code>composer run dev</code> ativo, abra duas abas do jogo. Nas ferramentas de desenvolvimento do navegador, veja a requisição <code>/api/broadcasting/auth</code> na aba Network e a conexão WebSocket na seção WS. Para acompanhar mensagens no terminal, inicie o Reverb com <code>php artisan reverb:start --debug</code> em vez do comando padrão.</p>
+      <p>Referências oficiais: <a href="https://laravel.com/docs/12.x/broadcasting">Broadcasting no Laravel</a> e <a href="https://laravel.com/docs/12.x/reverb">Laravel Reverb</a>.</p>
+    </section>
+  </main>
+</body>
+</html>
